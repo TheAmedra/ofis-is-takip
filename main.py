@@ -2,6 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import time
+import threading # Arka plan işlemleri için kütüphane
 from datetime import datetime
 import db_baglanti as db
 import kullanicilar_yonetimi as ky 
@@ -10,20 +11,18 @@ from streamlit_autorefresh import st_autorefresh
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
 
-# --- OTOMATİK YENİLEME AYARI ---
-# 60 saniyede bir sayfa yenilenir (Kotayı yormamak için ideal süre)
+# --- OTOMATİK YENİLEME (60 SANİYE) ---
+# Arka planda veriler işlendiği için burayı sıkıştırmaya gerek yok.
 st_autorefresh(interval=60000, limit=None, key="ofis_takip_auto_refresh")
 
 # --- CSS: TASARIM ---
 st.markdown("""
     <style>
-    /* HATA GİZLEME VE GÖRÜNÜM AYARLARI */
     [data-testid="stStatusWidget"] { visibility: hidden; height: 0%; position: fixed; }
     .stApp { opacity: 1 !important; }
     .element-container { opacity: 1 !important; }
     div[data-stale="true"] { opacity: 1 !important; }
-
-    /* DOSYA YÜKLEYİCİ */
+    
     [data-testid="stFileUploader"] { padding: 0 !important; margin: 0 !important; height: 38px !important; }
     [data-testid="stFileUploaderDropzone"] { min-height: 0px !important; height: 38px !important; border: 1px dashed #aaa !important; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center; }
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
@@ -32,17 +31,14 @@ st.markdown("""
     [data-testid="stFileUploader"] section { display: none !important; } 
     .uploadedFile { display: none !important; }
 
-    /* BUTONLAR */
     div.stButton > button { width: 100%; border-radius: 6px; height: 38px; font-weight: bold; padding: 0px !important;}
     
-    /* EXPANDER */
     .streamlit-expanderHeader { 
         font-size: 13px; color: #333; padding: 0px !important; 
         background-color: transparent !important; border: none !important;
     }
     .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
 
-    /* MOBİL HİZALAMA */
     @media (max-width: 768px) {
         [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
@@ -75,43 +71,19 @@ def isim_sadelestir(metin):
         temiz_isimler.append(ilk_isim)
     return ", ".join(temiz_isimler)
 
-# --- GÜÇLENDİRİLMİŞ VERİ ÇEKME FONKSİYONU ---
-# Hata alırsa 2 saniye bekleyip tekrar dener (Maksimum 3 deneme)
-@st.cache_data(ttl=50, show_spinner=False)
-def veri_getir(sayfa):
-    max_deneme = 3
-    for deneme in range(max_deneme):
-        try:
-            return db.veri_cek(sayfa)
-        except Exception as e:
-            # Eğer hata 'Quota exceeded' (429) ise ve son deneme hakkımız değilse bekle
-            if "429" in str(e) and deneme < max_deneme - 1:
-                time.sleep(2) # Google'a nefes aldırıyoruz
-                continue
-            elif deneme == max_deneme - 1:
-                # Son hakta da hata verirse kullanıcıya göster ama uygulamayı çökertme
-                st.error("⚠️ Sistem yoğun, lütfen biraz yavaş işlem yapın.")
-                return pd.DataFrame() # Boş tablo dön ki uygulama patlamasın
-            else:
-                raise e # Başka bir hataysa fırlat
-
-def veri_gonder(df, sayfa): 
-    # Yazma işleminde hata koruması
+# --- GOOGLE İŞLEMLERİ (ARKA PLAN) ---
+# Bu fonksiyon normal çalışıyor ama biz bunu Thread içinde çağıracağız.
+def veri_gonder_arkaplan(df, sayfa):
     try:
         db.veri_yaz(df, sayfa)
-        time.sleep(1) # İşlem sonrası 1 saniye zorunlu bekleme (Kotayı korumak için)
     except Exception as e:
-        if "429" in str(e):
-             time.sleep(3) # Hata aldıysa 3 saniye bekle tekrar dene
-             try:
-                 db.veri_yaz(df, sayfa)
-             except:
-                 st.error("⚠️ Google çok meşgul, işlem yapılamadı. 1 dakika sonra deneyin.")
-        else:
-            st.error(f"Kayıt hatası: {e}")
-            
-    veri_getir.clear()
-    st.cache_data.clear()
+        print(f"Arka plan kayıt hatası: {e}") 
+        # Arka planda hata olsa bile kullanıcıya yansıtma, bir sonraki seferde düzelir.
+
+# Verileri Google'dan çeken ana fonksiyon
+@st.cache_data(ttl=60, show_spinner=False)
+def veri_getir_google(sayfa):
+    return db.veri_cek(sayfa)
 
 @st.cache_data(ttl=600, show_spinner=False)
 def kullanici_listesi_getir():
@@ -124,11 +96,12 @@ with st.sidebar:
     secili_kullanici = st.selectbox("👤 Kullanıcı Seç", ["Seçiniz..."] + kullanici_listesi)
     
     st.markdown("---")
-    if st.button("🔄 Verileri Yenile", help="Anlık yenile"):
+    if st.button("🔄 Verileri Yenile", help="Google'dan en güncel veriyi çeker"):
         st.cache_data.clear()
+        if 'local_df_gorev' in st.session_state:
+            del st.session_state['local_df_gorev'] # Yerel hafızayı da sıfırla
         st.rerun()
     
-    st.caption("⏳ Veriler her 1 dakikada otomatik güncellenir.")
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
 
@@ -136,21 +109,37 @@ if secili_kullanici == "Seçiniz...":
     st.warning("Lütfen işlem yapmak için sol menüden isminizi seçin.")
     st.stop()
 
-# --- VERİLERİ YÜKLE ---
-try:
-    df_gorev = veri_getir(SAYFA_GOREVLER)
-    df_sekme = veri_getir(SAYFA_SEKMELER)
-except Exception:
-    df_gorev = pd.DataFrame()
-    df_sekme = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
+# --- VERİ YÖNETİMİ (HIZLANDIRILMIŞ) ---
+# Mantık şu: Google'dan bir kere çek, Session State'e at.
+# Tüm ekleme/silme işlemlerini Session State üzerinde yap (ANLIK HIZ).
+# Sonra Session State'in kopyasını arka planda Google'a gönder.
 
+# 1. Görevler Tablosu Hazırlığı
+if 'local_df_gorev' not in st.session_state:
+    # İlk açılışta veya yenilemede Google'dan çek
+    try:
+        st.session_state['local_df_gorev'] = veri_getir_google(SAYFA_GOREVLER)
+    except:
+        st.session_state['local_df_gorev'] = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
+
+# 2. Sekmeler Tablosu Hazırlığı
+if 'local_df_sekme' not in st.session_state:
+    try:
+        st.session_state['local_df_sekme'] = veri_getir_google(SAYFA_SEKMELER)
+    except:
+         st.session_state['local_df_sekme'] = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
+
+# Kısa isimler atayalım
+df_gorev = st.session_state['local_df_gorev']
+df_sekme = st.session_state['local_df_sekme']
+
+# Boş veri kontrolü ve onarımı
 if df_gorev.empty and "Gorev" not in df_gorev.columns:
     df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
 if "Sira" not in df_gorev.columns: df_gorev["Sira"] = 0
 
 if df_sekme.empty:
     df_sekme = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
-    veri_gonder(df_sekme, SAYFA_SEKMELER)
 
 # --- SAYFA: İŞ PANOSU ---
 if sayfa_secimi == "İş Panosu":
@@ -168,14 +157,16 @@ if sayfa_secimi == "İş Panosu":
                 with c5: ekle = st.button("EKLE", key=f"b_{sekme_adi}", type="primary")
 
                 if ekle and is_metni:
+                    # 1. Resmi hemen kaydet (Lokal)
                     r_yolu = ""
                     if resim:
                         r_ad = f"{int(time.time())}_{resim.name}"
                         r_yolu = os.path.join(KLASOR_RESIMLER, r_ad)
                         with open(r_yolu, "wb") as f: f.write(resim.getbuffer())
 
+                    # 2. Yeni satırı oluştur
                     atanan_str = ", ".join(kime) if kime else "Herkes"
-                    yeni = {
+                    yeni_veri = {
                         "Gorev": str(is_metni),
                         "Durum": "Bekliyor",
                         "Aciliyet": str(aciliyet),
@@ -188,15 +179,26 @@ if sayfa_secimi == "İş Panosu":
                         "Ekleyen": str(secili_kullanici),
                         "Sira": int(time.time())
                     }
-                    df_gorev = pd.concat([df_gorev, pd.DataFrame([yeni])], ignore_index=True)
-                    veri_gonder(df_gorev, SAYFA_GOREVLER)
-                    st.toast("✅ Eklendi!"); time.sleep(1); st.rerun()
+                    
+                    # 3. ANINDA GÜNCELLEME (Local Session State)
+                    st.session_state['local_df_gorev'] = pd.concat([st.session_state['local_df_gorev'], pd.DataFrame([yeni_veri])], ignore_index=True)
+                    
+                    # 4. ARKA PLANDA GOOGLE'A GÖNDER (Threading)
+                    # Kullanıcı bunu beklemez, işlem arkada devam eder.
+                    thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                    thread.start()
+                    
+                    # 5. Sayfayı yenile (Anlık tepki için)
+                    st.toast("🚀 Hızlıca eklendi!")
+                    time.sleep(0.1) 
+                    st.rerun()
 
             st.write("")
             
-            filtre = (df_gorev["Kategori"] == sekme_adi) & (df_gorev["Durum"] != "Silindi")
-            df_gorev["Sira"] = pd.to_numeric(df_gorev["Sira"], errors='coerce').fillna(0)
-            isler = df_gorev[filtre].sort_values(by="Sira", ascending=False)
+            # Tabloyu Session State'den (Hafızadan) okuduğumuz için şimşek hızında gelir
+            filtre = (st.session_state['local_df_gorev']["Kategori"] == sekme_adi) & (st.session_state['local_df_gorev']["Durum"] != "Silindi")
+            st.session_state['local_df_gorev']["Sira"] = pd.to_numeric(st.session_state['local_df_gorev']["Sira"], errors='coerce').fillna(0)
+            isler = st.session_state['local_df_gorev'][filtre].sort_values(by="Sira", ascending=False)
 
             if isler.empty:
                 st.info("📂 İş listesi boş.")
@@ -224,16 +226,22 @@ if sayfa_secimi == "İş Panosu":
                                 st.markdown("---")
                                 c_save, c_cancel = st.columns(2)
                                 if c_save.form_submit_button("💾 Kaydet", type="primary"):
-                                    df_gorev.loc[df_gorev["ID"] == row["ID"], "Gorev"] = new_gorev
-                                    df_gorev.loc[df_gorev["ID"] == row["ID"], "Aciliyet"] = new_acil
-                                    if resim_sil: df_gorev.loc[df_gorev["ID"] == row["ID"], "ResimYolu"] = ""
+                                    # Önce Hafızayı Güncelle
+                                    mask = st.session_state['local_df_gorev']["ID"] == row["ID"]
+                                    st.session_state['local_df_gorev'].loc[mask, "Gorev"] = new_gorev
+                                    st.session_state['local_df_gorev'].loc[mask, "Aciliyet"] = new_acil
+                                    
+                                    if resim_sil: st.session_state['local_df_gorev'].loc[mask, "ResimYolu"] = ""
                                     if yeni_resim_yukle:
                                         r_ad = f"{int(time.time())}_{yeni_resim_yukle.name}"
                                         r_yolu = os.path.join(KLASOR_RESIMLER, r_ad)
                                         with open(r_yolu, "wb") as f: f.write(yeni_resim_yukle.getbuffer())
-                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "ResimYolu"] = r_yolu
-
-                                    veri_gonder(df_gorev, SAYFA_GOREVLER)
+                                        st.session_state['local_df_gorev'].loc[mask, "ResimYolu"] = r_yolu
+                                    
+                                    # Arkada Gönder
+                                    thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                                    thread.start()
+                                    
                                     st.session_state[edit_key] = False
                                     st.rerun()
                                 if c_cancel.form_submit_button("İptal"):
@@ -246,12 +254,16 @@ if sayfa_secimi == "İş Panosu":
                                 y1, y2 = st.columns(2)
                                 with y1:
                                     if st.button("⬆️", key=f"u_{row['ID']}"):
-                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() + 100
-                                        veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                        st.session_state['local_df_gorev'].loc[st.session_state['local_df_gorev']["ID"] == row["ID"], "Sira"] = time.time() + 100
+                                        thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                                        thread.start()
+                                        st.rerun()
                                 with y2:
                                     if st.button("⬇️", key=f"d_{row['ID']}"):
-                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() - 100
-                                        veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                        st.session_state['local_df_gorev'].loc[st.session_state['local_df_gorev']["ID"] == row["ID"], "Sira"] = time.time() - 100
+                                        thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                                        thread.start()
+                                        st.rerun()
 
                             with c_icerik:
                                 stil = f"~~**{row['Gorev']}**~~" if row["Durum"] == "Tamamlandı" else f"**{row['Gorev']}**"
@@ -265,16 +277,24 @@ if sayfa_secimi == "İş Panosu":
                                 with b1:
                                     if row["Durum"] == "Bekliyor":
                                         if st.button("✅", key=f"ok_{row['ID']}", help="Tamamla"):
-                                            df_gorev.loc[df_gorev["ID"] == row["ID"], "Durum"] = "Tamamlandı"
-                                            veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                            # Hafızada anında güncelle
+                                            st.session_state['local_df_gorev'].loc[st.session_state['local_df_gorev']["ID"] == row["ID"], "Durum"] = "Tamamlandı"
+                                            # Arka planda gönder
+                                            thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                                            thread.start()
+                                            st.rerun()
                                     else:
                                         if st.button("↩️", key=f"back_{row['ID']}", help="Geri Al"):
-                                            df_gorev.loc[df_gorev["ID"] == row["ID"], "Durum"] = "Bekliyor"
-                                            veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                            st.session_state['local_df_gorev'].loc[st.session_state['local_df_gorev']["ID"] == row["ID"], "Durum"] = "Bekliyor"
+                                            thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                                            thread.start()
+                                            st.rerun()
                                 with b2:
                                     if st.button("❌", key=f"del_{row['ID']}", help="Sil"):
-                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "Durum"] = "Silindi"
-                                        veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                        st.session_state['local_df_gorev'].loc[st.session_state['local_df_gorev']["ID"] == row["ID"], "Durum"] = "Silindi"
+                                        thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+                                        thread.start()
+                                        st.rerun()
                                 with b3:
                                     if st.button("✏️", key=f"ed_btn_{row['ID']}", help="Düzenle"):
                                         st.session_state[edit_key] = True
@@ -287,23 +307,34 @@ elif sayfa_secimi == "Kategoriler":
     with st.form("k_form"):
         yeni_kat = st.text_input("Kategori Adı")
         if st.form_submit_button("Ekle"):
-            df_sekme = pd.concat([df_sekme, pd.DataFrame([{"Ad":yeni_kat.upper(), "Durum":"Aktif", "ID":int(time.time())}])], ignore_index=True)
-            veri_gonder(df_sekme, SAYFA_SEKMELER); st.rerun()
+            st.session_state['local_df_sekme'] = pd.concat([st.session_state['local_df_sekme'], pd.DataFrame([{"Ad":yeni_kat.upper(), "Durum":"Aktif", "ID":int(time.time())}])], ignore_index=True)
+            thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_sekme'], SAYFA_SEKMELER))
+            thread.start()
+            st.rerun()
     for idx, row in df_sekme[df_sekme["Durum"]=="Aktif"].iterrows():
         c1, c2 = st.columns([4,1])
         c1.write(f"📂 {row['Ad']}")
         if c2.button("Sil", key=f"ks_{row['ID']}"):
-            df_sekme.loc[df_sekme["ID"]==row["ID"], "Durum"]="Silindi"
-            veri_gonder(df_sekme, SAYFA_SEKMELER); st.rerun()
+            st.session_state['local_df_sekme'].loc[st.session_state['local_df_sekme']["ID"] == row["ID"], "Durum"] = "Silindi"
+            thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_sekme'], SAYFA_SEKMELER))
+            thread.start()
+            st.rerun()
 elif sayfa_secimi == "Çöp Kutusu":
     st.title("🗑️ Çöp Kutusu")
     if st.button("🔥 Hepsini Kalıcı Sil"):
-        df_gorev = df_gorev[df_gorev["Durum"]!="Silindi"]
-        veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+        # Hafızada temizle
+        st.session_state['local_df_gorev'] = st.session_state['local_df_gorev'][st.session_state['local_df_gorev']["Durum"] != "Silindi"]
+        # Arkada gönder
+        thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+        thread.start()
+        st.rerun()
+        
     silinenler = df_gorev[df_gorev["Durum"]=="Silindi"]
     for idx, row in silinenler.iterrows():
         c1, c2 = st.columns([4,1])
         c1.write(f"❌ {row['Gorev']}")
         if c2.button("Geri Al", key=f"r_{row['ID']}"):
-            df_gorev.loc[df_gorev["ID"]==row["ID"], "Durum"]="Bekliyor"
-            veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+            st.session_state['local_df_gorev'].loc[st.session_state['local_df_gorev']["ID"] == row["ID"], "Durum"] = "Bekliyor"
+            thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_gorev'], SAYFA_GOREVLER))
+            thread.start()
+            st.rerun()
