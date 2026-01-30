@@ -9,7 +9,7 @@ import kullanicilar_yonetimi as ky
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
 
-# --- CSS: TASARIM ---
+# --- CSS: TASARIM VE MOBİL HİZALAMA ---
 st.markdown("""
     <style>
     /* Dosya Yükleyici */
@@ -18,10 +18,9 @@ st.markdown("""
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
     
-    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME (YENİ) */
+    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME */
     [data-testid="stFileUploader"] ul { display: none !important; }
     [data-testid="stFileUploader"] section { display: none !important; } 
-    /* Bazı versiyonlarda liste farklı elementte olabilir, garantiye alalım */
     .uploadedFile { display: none !important; }
 
     /* Butonlar */
@@ -29,15 +28,34 @@ st.markdown("""
     
     /* Expander Ayarları */
     .streamlit-expanderHeader { 
-        font-size: 13px; 
-        color: #333; 
-        padding: 0px !important; 
-        background-color: transparent !important;
-        border: none !important;
+        font-size: 13px; color: #333; padding: 0px !important; 
+        background-color: transparent !important; border: none !important;
     }
-    .streamlit-expanderContent {
-        padding-top: 5px !important;
-        padding-bottom: 5px !important;
+    .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
+
+    /* --- MOBİL İÇİN ÖZEL HİZALAMA AYARI (SIHİRLİ DOKUNUŞ) --- */
+    @media (max-width: 768px) {
+        /* Mantık şu: Eğer bir "Yatay Blok" (stHorizontalBlock) başka bir "Sütun" (column) içindeyse,
+           onu mobilde zorla yan yana tut. 
+           (Bu sayede ana form bozulmaz ama oklar ve butonlar yan yana kalır)
+        */
+        div[data-testid="column"] div[data-testid="stHorizontalBlock"] {
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+        }
+        
+        /* İçerideki butonların genişliğini otomatiğe çekip sıkışmalarını sağla */
+        div[data-testid="column"] div[data-testid="stHorizontalBlock"] div[data-testid="column"] {
+            width: auto !important;
+            flex: 0 1 auto !important;
+            min-width: 30px !important; /* Butonun sığacağı minimum alan */
+        }
+        
+        /* Butonların içindeki boşlukları alarak yer kazanalım */
+        div[data-testid="column"] div[data-testid="stHorizontalBlock"] button {
+            padding-left: 5px !important;
+            padding-right: 5px !important;
+        }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -48,7 +66,7 @@ SAYFA_SEKMELER = 'sekmeler'
 KLASOR_RESIMLER = "uploads"
 if not os.path.exists(KLASOR_RESIMLER): os.makedirs(KLASOR_RESIMLER)
 
-# --- YARDIMCI FONKSİYONLAR (CACHE SİSTEMİ) ---
+# --- YARDIMCI FONKSİYONLAR ---
 def isim_sadelestir(metin):
     if not isinstance(metin, str) or metin == "": return ""
     temiz_isimler = []
@@ -212,13 +230,12 @@ if sayfa_secimi == "İş Panosu":
                         elif row["Aciliyet"] == "ACİL": bg_col = "#fffde7" 
 
                         with st.container(border=True):
-                            # GÜNCEL SÜTUN ORANLARI: [0.6, 6.4, 1.8]
-                            # Okları ve butonları birbirine yapıştırmak için alanlarını daralttık.
+                            # MOBİLDE ANA YAPININ BOZULMAMASI İÇİN ORANLARI KORUYORUZ
                             c_yon, c_icerik, c_btn = st.columns([0.6, 6.4, 1.8], vertical_alignment="center")
                             
-                            # 1. YÖN (Dar alanda yan yana)
+                            # 1. YÖN (CSS sayesinde mobilde de yan yana duracaklar)
                             with c_yon:
-                                y1, y2 = st.columns(2)
+                                y1, y2 = st.columns(2, gap="small")
                                 with y1:
                                     if st.button("⬆️", key=f"u_{row['ID']}"):
                                         df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() + 100
@@ -239,9 +256,9 @@ if sayfa_secimi == "İş Panosu":
                                 ekleyen_kisa = isim_sadelestir(row["Ekleyen"])
                                 st.caption(f"📅 {row['Tarih']} | {atanan_kisa}")
 
-                            # 3. BUTONLAR (Dar alanda yan yana ve sağa yakın)
+                            # 3. BUTONLAR (CSS sayesinde mobilde de yan yana duracaklar)
                             with c_btn:
-                                b1, b2, b3 = st.columns(3)
+                                b1, b2, b3 = st.columns(3, gap="small")
                                 with b1:
                                     if row["Durum"] == "Bekliyor":
                                         if st.button("✅", key=f"ok_{row['ID']}", help="Tamamla"):
