@@ -42,7 +42,7 @@ SAYFA_SEKMELER = 'sekmeler'
 KLASOR_RESIMLER = "uploads"
 if not os.path.exists(KLASOR_RESIMLER): os.makedirs(KLASOR_RESIMLER)
 
-# --- YARDIMCI FONKSİYONLAR (CACHE SİSTEMİ EKLENDİ) ---
+# --- YARDIMCI FONKSİYONLAR (CACHE SİSTEMİ) ---
 def isim_sadelestir(metin):
     if not isinstance(metin, str) or metin == "": return ""
     temiz_isimler = []
@@ -54,18 +54,16 @@ def isim_sadelestir(metin):
     return ", ".join(temiz_isimler)
 
 # Google Sheets okuma işlemini önbelleğe alıyoruz (TTL: 600 saniye = 10 dk)
-# Bu sayede her tıklamada API kotası yemez.
 @st.cache_data(ttl=600, show_spinner=False)
 def veri_getir(sayfa): 
     return db.veri_cek(sayfa)
 
-# Veri yazıldığında önbelleği temizliyoruz ki yeni veri hemen görünsün.
+# Veri yazıldığında önbelleği temizliyoruz
 def veri_gonder(df, sayfa): 
     db.veri_yaz(df, sayfa)
-    veri_getir.clear() # Cache'i temizle
-    st.cache_data.clear() # Tüm cache'i temizle (Garanti olsun)
+    veri_getir.clear()
+    st.cache_data.clear()
 
-# Kullanıcı listesini de cache'e alıyoruz (Sidebar sürekli çağırmasın)
 @st.cache_data(ttl=600, show_spinner=False)
 def kullanici_listesi_getir():
     return ky.get_kullanici_listesi_formatli()
@@ -73,9 +71,15 @@ def kullanici_listesi_getir():
 # --- YAN MENÜ ---
 with st.sidebar:
     st.title("🏢 Ofis Takip")
-    # Cache'li fonksiyonu kullanıyoruz
     kullanici_listesi = kullanici_listesi_getir()
     secili_kullanici = st.selectbox("👤 Kullanıcı Seç", ["Seçiniz..."] + kullanici_listesi)
+    
+    # YENİ EKLENEN BUTON: Bilgisayarda F5 yapmadan verileri çekmek için
+    st.markdown("---")
+    if st.button("🔄 Verileri Yenile", help="Telefondan girilen verileri görmek için tıkla"):
+        st.cache_data.clear()
+        st.rerun()
+        
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
 
@@ -205,16 +209,23 @@ if sayfa_secimi == "İş Panosu":
                         elif row["Aciliyet"] == "ACİL": bg_col = "#fffde7" 
 
                         with st.container(border=True):
-                            c_yon, c_icerik, c_btn = st.columns([0.4, 5.5, 1.3])
+                            # MOBİL HİZALAMA İÇİN SÜTUN AYARI GÜNCELLENDİ
+                            # [1.5, 5, 3.5] oranları ile butonlara ve oklara daha çok yer verdik.
+                            c_yon, c_icerik, c_btn = st.columns([1.5, 5, 3.5], vertical_alignment="center")
                             
+                            # 1. YÖN (Oklar yan yana)
                             with c_yon:
-                                if st.button("⬆️", key=f"u_{row['ID']}"):
-                                    df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() + 100
-                                    veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
-                                if st.button("⬇️", key=f"d_{row['ID']}"):
-                                    df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() - 100
-                                    veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                y1, y2 = st.columns(2)
+                                with y1:
+                                    if st.button("⬆️", key=f"u_{row['ID']}"):
+                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() + 100
+                                        veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
+                                with y2:
+                                    if st.button("⬇️", key=f"d_{row['ID']}"):
+                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() - 100
+                                        veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
 
+                            # 2. İÇERİK
                             with c_icerik:
                                 stil = f"~~**{row['Gorev']}**~~" if row["Durum"] == "Tamamlandı" else f"**{row['Gorev']}**"
                                 st.markdown(stil)
@@ -223,8 +234,9 @@ if sayfa_secimi == "İş Panosu":
                                         st.image(row["ResimYolu"], use_container_width=True)
                                 atanan_kisa = isim_sadelestir(row["Atananlar"])
                                 ekleyen_kisa = isim_sadelestir(row["Ekleyen"])
-                                st.caption(f"📅 {row['Tarih']} 👤 Atanan: {atanan_kisa} | ✍️ Ekleyen: {ekleyen_kisa}")
+                                st.caption(f"📅 {row['Tarih']} | {atanan_kisa}")
 
+                            # 3. BUTONLAR (Yan yana ve geniş)
                             with c_btn:
                                 b1, b2, b3 = st.columns(3)
                                 with b1:
@@ -247,8 +259,6 @@ if sayfa_secimi == "İş Panosu":
 
 # --- DİĞER SAYFALAR ---
 elif sayfa_secimi == "Kullanıcılar":
-    # Kullanıcı sayfasının kendi içinde yaptığı çağrıları yönetmek zor olabilir 
-    # ama ana veri yükünü hafiflettiğimiz için hata ihtimali düşecektir.
     ky.yonetim_sayfasi()
 
 elif sayfa_secimi == "Kategoriler":
