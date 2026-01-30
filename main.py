@@ -11,6 +11,7 @@ from streamlit_autorefresh import st_autorefresh
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
 
 # --- OTOMATİK YENİLEME AYARI ---
+# 60 saniyede bir sayfa yenilenir (Kotayı yormamak için ideal süre)
 st_autorefresh(interval=60000, limit=None, key="ofis_takip_auto_refresh")
 
 # --- CSS: TASARIM ---
@@ -98,11 +99,14 @@ def veri_gonder(df, sayfa):
     # Yazma işleminde hata koruması
     try:
         db.veri_yaz(df, sayfa)
-        time.sleep(0.5) # İşlem sonrası yarım saniye zorunlu bekleme (Kotayı korumak için)
+        time.sleep(1) # İşlem sonrası 1 saniye zorunlu bekleme (Kotayı korumak için)
     except Exception as e:
         if "429" in str(e):
-             time.sleep(2)
-             db.veri_yaz(df, sayfa)
+             time.sleep(3) # Hata aldıysa 3 saniye bekle tekrar dene
+             try:
+                 db.veri_yaz(df, sayfa)
+             except:
+                 st.error("⚠️ Google çok meşgul, işlem yapılamadı. 1 dakika sonra deneyin.")
         else:
             st.error(f"Kayıt hatası: {e}")
             
