@@ -2,7 +2,7 @@ import streamlit as st
 import pandas as pd
 import os
 import time
-import threading # Arka plan işlemleri için kütüphane
+import threading 
 from datetime import datetime
 import db_baglanti as db
 import kullanicilar_yonetimi as ky 
@@ -17,20 +17,19 @@ st_autorefresh(interval=60000, limit=None, key="ofis_takip_auto_refresh")
 # --- CSS: TASARIM ---
 st.markdown("""
     <style>
-    /* 1. GÖRÜNÜM AYARLARI (Loading gizleme vb.) */
+    /* 1. GÖRÜNÜM AYARLARI */
     [data-testid="stStatusWidget"] { visibility: hidden; height: 0%; position: fixed; }
     .stApp { opacity: 1 !important; }
     .element-container { opacity: 1 !important; }
     div[data-stale="true"] { opacity: 1 !important; }
     
-    /* 2. DOSYA YÜKLEYİCİ (GÜNCELLENDİ) */
+    /* 2. DOSYA YÜKLEYİCİ */
     [data-testid="stFileUploader"] { padding: 0 !important; margin: 0 !important; height: 38px !important; }
     [data-testid="stFileUploaderDropzone"] { min-height: 0px !important; height: 38px !important; border: 1px dashed #aaa !important; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center; }
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
     
-    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME (DÜZELTİLDİ) */
-    /* Artık 'section' gizlemiyoruz, sadece dosya listesini hedefliyoruz */
+    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME */
     [data-testid="stFileUploader"] ul { display: none !important; }
     [data-testid="stFileUploaderFile"] { display: none !important; }
     .uploadedFile { display: none !important; }
@@ -149,8 +148,12 @@ if sayfa_secimi == "İş Panosu":
         with sekmeler[i]:
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 1, 1.2, 2, 1], vertical_alignment="bottom")
-                with c1: is_metni = st.text_input("Gorev", key=f"t_{sekme_adi}", placeholder="Görev yaz...", label_visibility="collapsed")
-                with c2: resim = st.file_uploader("Resim", type=["jpg","png"], key=f"f_{sekme_adi}", label_visibility="collapsed")
+                # KEY TANIMLAMALARI ÖNEMLİ (Sıfırlama için kullanacağız)
+                key_text = f"t_{sekme_adi}"
+                key_file = f"f_{sekme_adi}"
+                
+                with c1: is_metni = st.text_input("Gorev", key=key_text, placeholder="Görev yaz...", label_visibility="collapsed")
+                with c2: resim = st.file_uploader("Resim", type=["jpg","png"], key=key_file, label_visibility="collapsed")
                 with c3: aciliyet = st.selectbox("Öncelik", ["NORMAL", "ACİL", "YARIN"], key=f"a_{sekme_adi}", label_visibility="collapsed")
                 with c4: kime = st.multiselect("Atanan", kullanici_listesi, default=[], key=f"w_{sekme_adi}", placeholder="Kişi", label_visibility="collapsed")
                 with c5: ekle = st.button("EKLE", key=f"b_{sekme_adi}", type="primary")
@@ -183,6 +186,12 @@ if sayfa_secimi == "İş Panosu":
                     thread.start()
                     
                     st.toast("🚀 Hızlıca eklendi!")
+                    
+                    # --- FOTOĞRAF VE YAZIYI SIFIRLAMA (FİNAL DOKUNUŞ) ---
+                    # Bu kod, Ekle butonuna bastıktan sonra inputları temizler
+                    st.session_state[key_text] = "" # Yazıyı sil
+                    st.session_state[key_file] = None # Fotoğrafı sil (ÖNEMLİ)
+                    
                     time.sleep(0.1) 
                     st.rerun()
 
