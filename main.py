@@ -17,24 +17,20 @@ st_autorefresh(interval=60000, limit=None, key="ofis_takip_auto_refresh")
 # --- CSS: TASARIM ---
 st.markdown("""
     <style>
-    /* 1. GÖRÜNÜM AYARLARI */
     [data-testid="stStatusWidget"] { visibility: hidden; height: 0%; position: fixed; }
     .stApp { opacity: 1 !important; }
     .element-container { opacity: 1 !important; }
     div[data-stale="true"] { opacity: 1 !important; }
     
-    /* 2. DOSYA YÜKLEYİCİ */
     [data-testid="stFileUploader"] { padding: 0 !important; margin: 0 !important; height: 38px !important; }
     [data-testid="stFileUploaderDropzone"] { min-height: 0px !important; height: 38px !important; border: 1px dashed #aaa !important; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center; }
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
     
-    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME */
     [data-testid="stFileUploader"] ul { display: none !important; }
     [data-testid="stFileUploaderFile"] { display: none !important; }
     .uploadedFile { display: none !important; }
 
-    /* 3. BUTONLAR VE EXPANDER */
     div.stButton > button { width: 100%; border-radius: 6px; height: 38px; font-weight: bold; padding: 0px !important;}
     
     .streamlit-expanderHeader { 
@@ -43,7 +39,6 @@ st.markdown("""
     }
     .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
 
-    /* 4. MOBİL İÇİN YAN YANA HİZALAMA */
     @media (max-width: 768px) {
         [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
@@ -83,12 +78,10 @@ def veri_gonder_arkaplan(df, sayfa):
     except Exception as e:
         print(f"Arka plan kayıt hatası: {e}") 
 
-# Verileri Google'dan çeken ana fonksiyon (Önbellek 60sn)
 @st.cache_data(ttl=60, show_spinner=False)
 def veri_getir_google(sayfa):
     return db.veri_cek(sayfa)
 
-# KULLANICI LİSTESİ (15 saniye)
 @st.cache_data(ttl=15, show_spinner=False)
 def kullanici_listesi_getir():
     return ky.get_kullanici_listesi_formatli()
@@ -109,33 +102,33 @@ with st.sidebar:
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
 
-if secili_kullanici == "Seçiniz...":
+# --- ERİŞİM KONTROLÜ (KİLİT AÇILDI 🔓) ---
+# Eğer kullanıcı seçilmediyse normalde durduruyoruz.
+# AMA kullanıcı "Kullanıcılar" sayfasına gitmek istiyorsa durdurmuyoruz (ki yeni kişi ekleyebilsin).
+if secili_kullanici == "Seçiniz..." and sayfa_secimi != "Kullanıcılar":
     st.warning("Lütfen işlem yapmak için sol menüden isminizi seçin.")
+    st.info("💡 Eğer listede isminiz yoksa, sol menüden **'Kullanıcılar'** sekmesine tıklayarak yeni personel ekleyebilirsiniz.")
     st.stop()
 
-# --- VERİ YÖNETİMİ (OPTIMISTIC UI) ---
-# 1. Görevler Tablosu Hazırlığı
+# --- VERİ YÖNETİMİ ---
 if 'local_df_gorev' not in st.session_state:
     try:
         st.session_state['local_df_gorev'] = veri_getir_google(SAYFA_GOREVLER)
     except:
         st.session_state['local_df_gorev'] = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
 
-# 2. Sekmeler Tablosu Hazırlığı
 if 'local_df_sekme' not in st.session_state:
     try:
         st.session_state['local_df_sekme'] = veri_getir_google(SAYFA_SEKMELER)
     except:
          st.session_state['local_df_sekme'] = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
 
-# 3. FORM RESET SAYACI (HATA DÜZELTME İÇİN EKLENDİ)
 if 'form_reset_id' not in st.session_state:
     st.session_state['form_reset_id'] = 0
 
 df_gorev = st.session_state['local_df_gorev']
 df_sekme = st.session_state['local_df_sekme']
 
-# Boş veri kontrolü
 if df_gorev.empty and "Gorev" not in df_gorev.columns:
     df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
 if "Sira" not in df_gorev.columns: df_gorev["Sira"] = 0
@@ -153,9 +146,6 @@ if sayfa_secimi == "İş Panosu":
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 1, 1.2, 2, 1], vertical_alignment="bottom")
                 
-                # --- KEY STRATEJİSİ (DÜZELTİLDİ) ---
-                # Key'in sonuna 'form_reset_id' ekliyoruz. Bu ID değişince Streamlit
-                # eski widget'ı silip yerine tertemiz yeni bir widget koyar.
                 current_reset_id = st.session_state['form_reset_id']
                 key_text = f"t_{sekme_adi}_{current_reset_id}"
                 key_file = f"f_{sekme_adi}_{current_reset_id}"
@@ -194,12 +184,7 @@ if sayfa_secimi == "İş Panosu":
                     thread.start()
                     
                     st.toast("🚀 Hızlıca eklendi!")
-                    
-                    # --- SIFIRLAMA YÖNTEMİ (HATA VERMEYEN VERSİYON) ---
-                    # Manuel silmek yerine, sayacı artırıyoruz.
-                    # Bir sonraki yenilemede KEY değişeceği için kutular boş gelecek.
                     st.session_state['form_reset_id'] += 1
-                    
                     time.sleep(0.1) 
                     st.rerun()
 
