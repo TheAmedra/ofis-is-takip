@@ -23,13 +23,16 @@ st.markdown("""
     .element-container { opacity: 1 !important; }
     div[data-stale="true"] { opacity: 1 !important; }
     
-    /* 2. DOSYA YÜKLEYİCİ */
+    /* 2. DOSYA YÜKLEYİCİ (GÜNCELLENDİ) */
     [data-testid="stFileUploader"] { padding: 0 !important; margin: 0 !important; height: 38px !important; }
     [data-testid="stFileUploaderDropzone"] { min-height: 0px !important; height: 38px !important; border: 1px dashed #aaa !important; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center; }
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
+    
+    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME (DÜZELTİLDİ) */
+    /* Artık 'section' gizlemiyoruz, sadece dosya listesini hedefliyoruz */
     [data-testid="stFileUploader"] ul { display: none !important; }
-    [data-testid="stFileUploader"] section { display: none !important; } 
+    [data-testid="stFileUploaderFile"] { display: none !important; }
     .uploadedFile { display: none !important; }
 
     /* 3. BUTONLAR VE EXPANDER */
@@ -86,8 +89,7 @@ def veri_gonder_arkaplan(df, sayfa):
 def veri_getir_google(sayfa):
     return db.veri_cek(sayfa)
 
-# KULLANICI LİSTESİ (GÜNCELLENDİ: TTL 15 saniyeye düştü)
-# Böylece yeni eklenen kullanıcı en geç 15 saniye sonra listede görünür.
+# KULLANICI LİSTESİ (15 saniye)
 @st.cache_data(ttl=15, show_spinner=False)
 def kullanici_listesi_getir():
     return ky.get_kullanici_listesi_formatli()
@@ -102,7 +104,7 @@ with st.sidebar:
     if st.button("🔄 Verileri Yenile", help="Google'dan en güncel veriyi çeker"):
         st.cache_data.clear()
         if 'local_df_gorev' in st.session_state:
-            del st.session_state['local_df_gorev'] # Yerel hafızayı da sıfırla
+            del st.session_state['local_df_gorev']
         st.rerun()
     
     st.markdown("---")
@@ -259,7 +261,6 @@ if sayfa_secimi == "İş Panosu":
                                 if row["ResimYolu"] and row["ResimYolu"] != "nan" and os.path.exists(row["ResimYolu"]):
                                     with st.expander("📷 Fotoğraf"): st.image(row["ResimYolu"], use_container_width=True)
                                 
-                                # GÜNCELLENEN KISIM: İSTENİLEN FORMAT
                                 st.caption(f"📅 {row['Tarih']} | 👤 Atanan: {isim_sadelestir(row['Atananlar'])} | ✍️ Ekleyen: {isim_sadelestir(row['Ekleyen'])}")
 
                             with c_btn:
