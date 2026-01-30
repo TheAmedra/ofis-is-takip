@@ -128,6 +128,10 @@ if 'local_df_sekme' not in st.session_state:
     except:
          st.session_state['local_df_sekme'] = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
 
+# 3. FORM RESET SAYACI (HATA DÜZELTME İÇİN EKLENDİ)
+if 'form_reset_id' not in st.session_state:
+    st.session_state['form_reset_id'] = 0
+
 df_gorev = st.session_state['local_df_gorev']
 df_sekme = st.session_state['local_df_sekme']
 
@@ -148,9 +152,13 @@ if sayfa_secimi == "İş Panosu":
         with sekmeler[i]:
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 1, 1.2, 2, 1], vertical_alignment="bottom")
-                # KEY TANIMLAMALARI ÖNEMLİ (Sıfırlama için kullanacağız)
-                key_text = f"t_{sekme_adi}"
-                key_file = f"f_{sekme_adi}"
+                
+                # --- KEY STRATEJİSİ (DÜZELTİLDİ) ---
+                # Key'in sonuna 'form_reset_id' ekliyoruz. Bu ID değişince Streamlit
+                # eski widget'ı silip yerine tertemiz yeni bir widget koyar.
+                current_reset_id = st.session_state['form_reset_id']
+                key_text = f"t_{sekme_adi}_{current_reset_id}"
+                key_file = f"f_{sekme_adi}_{current_reset_id}"
                 
                 with c1: is_metni = st.text_input("Gorev", key=key_text, placeholder="Görev yaz...", label_visibility="collapsed")
                 with c2: resim = st.file_uploader("Resim", type=["jpg","png"], key=key_file, label_visibility="collapsed")
@@ -187,10 +195,10 @@ if sayfa_secimi == "İş Panosu":
                     
                     st.toast("🚀 Hızlıca eklendi!")
                     
-                    # --- FOTOĞRAF VE YAZIYI SIFIRLAMA (FİNAL DOKUNUŞ) ---
-                    # Bu kod, Ekle butonuna bastıktan sonra inputları temizler
-                    st.session_state[key_text] = "" # Yazıyı sil
-                    st.session_state[key_file] = None # Fotoğrafı sil (ÖNEMLİ)
+                    # --- SIFIRLAMA YÖNTEMİ (HATA VERMEYEN VERSİYON) ---
+                    # Manuel silmek yerine, sayacı artırıyoruz.
+                    # Bir sonraki yenilemede KEY değişeceği için kutular boş gelecek.
+                    st.session_state['form_reset_id'] += 1
                     
                     time.sleep(0.1) 
                     st.rerun()
