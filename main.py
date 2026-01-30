@@ -18,6 +18,12 @@ st.markdown("""
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
     
+    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME (YENİ) */
+    [data-testid="stFileUploader"] ul { display: none !important; }
+    [data-testid="stFileUploader"] section { display: none !important; } 
+    /* Bazı versiyonlarda liste farklı elementte olabilir, garantiye alalım */
+    .uploadedFile { display: none !important; }
+
     /* Butonlar */
     div.stButton > button { width: 100%; border-radius: 6px; height: 38px; font-weight: bold; padding: 0px !important;}
     
@@ -53,12 +59,10 @@ def isim_sadelestir(metin):
         temiz_isimler.append(ilk_isim)
     return ", ".join(temiz_isimler)
 
-# Google Sheets okuma işlemini önbelleğe alıyoruz (TTL: 600 saniye = 10 dk)
 @st.cache_data(ttl=600, show_spinner=False)
 def veri_getir(sayfa): 
     return db.veri_cek(sayfa)
 
-# Veri yazıldığında önbelleği temizliyoruz
 def veri_gonder(df, sayfa): 
     db.veri_yaz(df, sayfa)
     veri_getir.clear()
@@ -74,7 +78,6 @@ with st.sidebar:
     kullanici_listesi = kullanici_listesi_getir()
     secili_kullanici = st.selectbox("👤 Kullanıcı Seç", ["Seçiniz..."] + kullanici_listesi)
     
-    # YENİ EKLENEN BUTON: Bilgisayarda F5 yapmadan verileri çekmek için
     st.markdown("---")
     if st.button("🔄 Verileri Yenile", help="Telefondan girilen verileri görmek için tıkla"):
         st.cache_data.clear()
@@ -209,11 +212,11 @@ if sayfa_secimi == "İş Panosu":
                         elif row["Aciliyet"] == "ACİL": bg_col = "#fffde7" 
 
                         with st.container(border=True):
-                            # MOBİL HİZALAMA İÇİN SÜTUN AYARI GÜNCELLENDİ
-                            # [1.5, 5, 3.5] oranları ile butonlara ve oklara daha çok yer verdik.
-                            c_yon, c_icerik, c_btn = st.columns([1.5, 5, 3.5], vertical_alignment="center")
+                            # GÜNCEL SÜTUN ORANLARI: [0.6, 6.4, 1.8]
+                            # Okları ve butonları birbirine yapıştırmak için alanlarını daralttık.
+                            c_yon, c_icerik, c_btn = st.columns([0.6, 6.4, 1.8], vertical_alignment="center")
                             
-                            # 1. YÖN (Oklar yan yana)
+                            # 1. YÖN (Dar alanda yan yana)
                             with c_yon:
                                 y1, y2 = st.columns(2)
                                 with y1:
@@ -236,7 +239,7 @@ if sayfa_secimi == "İş Panosu":
                                 ekleyen_kisa = isim_sadelestir(row["Ekleyen"])
                                 st.caption(f"📅 {row['Tarih']} | {atanan_kisa}")
 
-                            # 3. BUTONLAR (Yan yana ve geniş)
+                            # 3. BUTONLAR (Dar alanda yan yana ve sağa yakın)
                             with c_btn:
                                 b1, b2, b3 = st.columns(3)
                                 with b1:
