@@ -5,9 +5,16 @@ import time
 from datetime import datetime
 import db_baglanti as db
 import kullanicilar_yonetimi as ky 
+# Otomatik yenileme kütüphanesini çağırıyoruz
+from streamlit_autorefresh import st_autorefresh
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
+
+# --- OTOMATİK YENİLEME AYARI (YENİ) ---
+# interval=10000 (milisaniye cinsinden 10 saniye demektir)
+# Bu kod sayfayı dondurmadan arka planda sayar ve 10 saniye dolunca verileri tazeler.
+st_autorefresh(interval=10000, limit=None, key="ofis_takip_auto_refresh")
 
 # --- CSS: TASARIM VE MOBİL HİZALAMA ---
 st.markdown("""
@@ -33,25 +40,17 @@ st.markdown("""
     }
     .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
 
-    /* --- MOBİL İÇİN KESİN ÇÖZÜM CSS (GÜNCELLENDİ) --- */
+    /* --- MOBİL İÇİN KESİN ÇÖZÜM CSS --- */
     @media (max-width: 768px) {
-        /* Sadece "Sütunların İçindeki Sütunları" hedefler.
-           Böylece üstteki ana form (Görev yaz, Kişi seç vb.) bozulmaz, onlar alt alta inebilir.
-           Ama Oklar ve Aksiyon butonları bir sütunun içinde olduğu için YAN YANA kalır.
-        */
         [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
             flex-wrap: nowrap !important;
         }
-
-        /* Yan yana durmaya zorlanan sütunların genişliğini otomatiğe çek */
         [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="column"] {
             width: auto !important;
             flex: 1 1 auto !important;
             min-width: 0px !important;
         }
-
-        /* Butonların iç boşluklarını mobilde biraz kısalım ki sığsınlar */
         div.stButton > button {
             padding-left: 0px !important;
             padding-right: 0px !important;
@@ -77,6 +76,8 @@ def isim_sadelestir(metin):
         temiz_isimler.append(ilk_isim)
     return ", ".join(temiz_isimler)
 
+# Cache süresini kısalttık (veya auto-refresh zaten cache'i temizleyerek çalışacak)
+# Ama burada TTL'i yine de güvenli tutalım, refresh sırasında cache.clear() yapacağız.
 @st.cache_data(ttl=600, show_spinner=False)
 def veri_getir(sayfa): 
     return db.veri_cek(sayfa)
@@ -97,9 +98,13 @@ with st.sidebar:
     secili_kullanici = st.selectbox("👤 Kullanıcı Seç", ["Seçiniz..."] + kullanici_listesi)
     
     st.markdown("---")
-    if st.button("🔄 Verileri Yenile", help="Telefondan girilen verileri görmek için tıkla"):
+    # Manuel yenileme butonu hala kalsın, acil durumlar için.
+    if st.button("🔄 Verileri Yenile", help="Anlık yenile"):
         st.cache_data.clear()
         st.rerun()
+    
+    # Bilgi notu (İsteğe bağlı silebilirsin)
+    st.caption("⏳ Sayfa her 10 saniyede bir güncellenir.")
         
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
@@ -108,7 +113,22 @@ if secili_kullanici == "Seçiniz...":
     st.warning("Lütfen işlem yapmak için sol menüden isminizi seçin.")
     st.stop()
 
+# Auto-Refresh çalıştığında cache'den eski veriyi getirmemesi için
+# Her döngüde cache'i temizlemek biraz ağır olabilir ama "Canlı" görüntü için gereklidir.
+# Ancak sürekli cache temizlemek Google API kotasını zorlayabilir.
+# Bu yüzden şöyle bir mantık kuruyoruz:
+# Streamlit her refresh attığında kod baştan çalışır.
+# Biz sadece veri_getir fonksiyonunu çağırıyoruz. Cache süresi (ttl=600) olduğu için Google'a gitmez.
+# AMA sen "Canlı" olsun istiyorsun. O zaman Google'a gitmek ZORUNDA.
+# Kotayı korumak için bu süreyi 10 saniye yapmak riskli olabilir (dakikada 6 istek x Kullanıcı Sayısı).
+# Eğer kullanıcı sayısı azsa (3-5 kişi) sorun olmaz. Ama 50 kişi varsa Google "Yavaş ol" diyebilir.
+# Şimdilik "Cache"i temizlemeden sadece sayfayı yeniletiyoruz. 
+# Eğer veriler güncellenmiyorsa `veri_getir.clear()` komutunu aktif ederiz.
+
 # --- VERİLERİ YÜKLE ---
+# Her 10 saniyede bir sayfayı yenilediğimizde güncel veriyi çekmek için cache'i deliyoruz.
+# Not: Kota sorunu yaşarsan buradaki .clear() satırlarını kaldır.
+veri_getir.clear() 
 df_gorev = veri_getir(SAYFA_GOREVLER)
 df_sekme = veri_getir(SAYFA_SEKMELER)
 
@@ -233,7 +253,7 @@ if sayfa_secimi == "İş Panosu":
                             # MOBİL İÇİN HİZALAMA
                             c_yon, c_icerik, c_btn = st.columns([0.6, 6.4, 1.8], vertical_alignment="center")
                             
-                            # 1. YÖN (CSS buradaki st.columns'ı yan yana olmaya zorlayacak)
+                            # 1. YÖN
                             with c_yon:
                                 y1, y2 = st.columns(2)
                                 with y1:
@@ -256,7 +276,7 @@ if sayfa_secimi == "İş Panosu":
                                 ekleyen_kisa = isim_sadelestir(row["Ekleyen"])
                                 st.caption(f"📅 {row['Tarih']} | {atanan_kisa}")
 
-                            # 3. BUTONLAR (CSS buradaki st.columns'ı da yan yana olmaya zorlayacak)
+                            # 3. BUTONLAR
                             with c_btn:
                                 b1, b2, b3 = st.columns(3)
                                 with b1:
