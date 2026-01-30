@@ -33,28 +33,28 @@ st.markdown("""
     }
     .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
 
-    /* --- MOBİL İÇİN ÖZEL HİZALAMA AYARI (SIHİRLİ DOKUNUŞ) --- */
+    /* --- MOBİL İÇİN KESİN ÇÖZÜM CSS (GÜNCELLENDİ) --- */
     @media (max-width: 768px) {
-        /* Mantık şu: Eğer bir "Yatay Blok" (stHorizontalBlock) başka bir "Sütun" (column) içindeyse,
-           onu mobilde zorla yan yana tut. 
-           (Bu sayede ana form bozulmaz ama oklar ve butonlar yan yana kalır)
+        /* Sadece "Sütunların İçindeki Sütunları" hedefler.
+           Böylece üstteki ana form (Görev yaz, Kişi seç vb.) bozulmaz, onlar alt alta inebilir.
+           Ama Oklar ve Aksiyon butonları bir sütunun içinde olduğu için YAN YANA kalır.
         */
-        div[data-testid="column"] div[data-testid="stHorizontalBlock"] {
+        [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
             flex-wrap: nowrap !important;
         }
-        
-        /* İçerideki butonların genişliğini otomatiğe çekip sıkışmalarını sağla */
-        div[data-testid="column"] div[data-testid="stHorizontalBlock"] div[data-testid="column"] {
+
+        /* Yan yana durmaya zorlanan sütunların genişliğini otomatiğe çek */
+        [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] > [data-testid="column"] {
             width: auto !important;
-            flex: 0 1 auto !important;
-            min-width: 30px !important; /* Butonun sığacağı minimum alan */
+            flex: 1 1 auto !important;
+            min-width: 0px !important;
         }
-        
-        /* Butonların içindeki boşlukları alarak yer kazanalım */
-        div[data-testid="column"] div[data-testid="stHorizontalBlock"] button {
-            padding-left: 5px !important;
-            padding-right: 5px !important;
+
+        /* Butonların iç boşluklarını mobilde biraz kısalım ki sığsınlar */
+        div.stButton > button {
+            padding-left: 0px !important;
+            padding-right: 0px !important;
         }
     }
     </style>
@@ -230,12 +230,12 @@ if sayfa_secimi == "İş Panosu":
                         elif row["Aciliyet"] == "ACİL": bg_col = "#fffde7" 
 
                         with st.container(border=True):
-                            # MOBİLDE ANA YAPININ BOZULMAMASI İÇİN ORANLARI KORUYORUZ
+                            # MOBİL İÇİN HİZALAMA
                             c_yon, c_icerik, c_btn = st.columns([0.6, 6.4, 1.8], vertical_alignment="center")
                             
-                            # 1. YÖN (CSS sayesinde mobilde de yan yana duracaklar)
+                            # 1. YÖN (CSS buradaki st.columns'ı yan yana olmaya zorlayacak)
                             with c_yon:
-                                y1, y2 = st.columns(2, gap="small")
+                                y1, y2 = st.columns(2)
                                 with y1:
                                     if st.button("⬆️", key=f"u_{row['ID']}"):
                                         df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() + 100
@@ -256,9 +256,9 @@ if sayfa_secimi == "İş Panosu":
                                 ekleyen_kisa = isim_sadelestir(row["Ekleyen"])
                                 st.caption(f"📅 {row['Tarih']} | {atanan_kisa}")
 
-                            # 3. BUTONLAR (CSS sayesinde mobilde de yan yana duracaklar)
+                            # 3. BUTONLAR (CSS buradaki st.columns'ı da yan yana olmaya zorlayacak)
                             with c_btn:
-                                b1, b2, b3 = st.columns(3, gap="small")
+                                b1, b2, b3 = st.columns(3)
                                 with b1:
                                     if row["Durum"] == "Bekliyor":
                                         if st.button("✅", key=f"ok_{row['ID']}", help="Tamamla"):
