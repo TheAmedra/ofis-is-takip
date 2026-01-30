@@ -10,54 +10,38 @@ from streamlit_autorefresh import st_autorefresh
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
 
-# --- OTOMATİK YENİLEME AYARI (1 DAKİKA) ---
-# interval=60000 (60 saniye). Sayfa 1 dakikada bir sessizce yenilenir.
+# --- OTOMATİK YENİLEME AYARI ---
 st_autorefresh(interval=60000, limit=None, key="ofis_takip_auto_refresh")
 
-# --- CSS: TASARIM, MOBİL HİZALAMA VE "HAYALET YENİLEME" ---
+# --- CSS: TASARIM ---
 st.markdown("""
     <style>
-    /* 1. YENİLEME EFEKTİNİ GİZLEME (HAYALET MODU) */
-    /* Sağ üstteki 'Running' animasyonunu ve durdur butonunu gizle */
-    [data-testid="stStatusWidget"] {
-        visibility: hidden;
-        height: 0%;
-        position: fixed;
-    }
-    
-    /* Sayfa yenilenirken elementlerin silikleşmesini (grileşmesini) engelle */
-    .stApp {
-        opacity: 1 !important;
-    }
-    .element-container {
-        opacity: 1 !important;
-    }
-    /* Streamlit'in otomatik 'stale' (bayat) sınıfını ezerek opaklığı tam tut */
-    div[data-stale="true"] {
-        opacity: 1 !important;
-    }
+    /* HATA GİZLEME VE GÖRÜNÜM AYARLARI */
+    [data-testid="stStatusWidget"] { visibility: hidden; height: 0%; position: fixed; }
+    .stApp { opacity: 1 !important; }
+    .element-container { opacity: 1 !important; }
+    div[data-stale="true"] { opacity: 1 !important; }
 
-    /* 2. DOSYA YÜKLEYİCİ AYARLARI */
+    /* DOSYA YÜKLEYİCİ */
     [data-testid="stFileUploader"] { padding: 0 !important; margin: 0 !important; height: 38px !important; }
     [data-testid="stFileUploaderDropzone"] { min-height: 0px !important; height: 38px !important; border: 1px dashed #aaa !important; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center; }
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
-    
-    /* Yüklenen dosya listesini gizle */
     [data-testid="stFileUploader"] ul { display: none !important; }
     [data-testid="stFileUploader"] section { display: none !important; } 
     .uploadedFile { display: none !important; }
 
-    /* 3. BUTON VE EXPANDER AYARLARI */
+    /* BUTONLAR */
     div.stButton > button { width: 100%; border-radius: 6px; height: 38px; font-weight: bold; padding: 0px !important;}
     
+    /* EXPANDER */
     .streamlit-expanderHeader { 
         font-size: 13px; color: #333; padding: 0px !important; 
         background-color: transparent !important; border: none !important;
     }
     .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
 
-    /* 4. MOBİL İÇİN YAN YANA HİZALAMA (KESİN ÇÖZÜM) */
+    /* MOBİL HİZALAMA */
     @media (max-width: 768px) {
         [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
@@ -68,10 +52,7 @@ st.markdown("""
             flex: 1 1 auto !important;
             min-width: 0px !important;
         }
-        div.stButton > button {
-            padding-left: 0px !important;
-            padding-right: 0px !important;
-        }
+        div.stButton > button { padding-left: 0px !important; padding-right: 0px !important; }
     }
     </style>
 """, unsafe_allow_html=True)
@@ -93,15 +74,38 @@ def isim_sadelestir(metin):
         temiz_isimler.append(ilk_isim)
     return ", ".join(temiz_isimler)
 
-# CACHE AYARI (1 DAKİKA)
-# Sayfa 60 saniyede bir yenileniyor. Cache süresini 50 saniye yapalım ki
-# sayfa yenilendiğinde cache süresi dolmuş olsun ve mecburen yeni veriyi çeksin.
+# --- GÜÇLENDİRİLMİŞ VERİ ÇEKME FONKSİYONU ---
+# Hata alırsa 2 saniye bekleyip tekrar dener (Maksimum 3 deneme)
 @st.cache_data(ttl=50, show_spinner=False)
-def veri_getir(sayfa): 
-    return db.veri_cek(sayfa)
+def veri_getir(sayfa):
+    max_deneme = 3
+    for deneme in range(max_deneme):
+        try:
+            return db.veri_cek(sayfa)
+        except Exception as e:
+            # Eğer hata 'Quota exceeded' (429) ise ve son deneme hakkımız değilse bekle
+            if "429" in str(e) and deneme < max_deneme - 1:
+                time.sleep(2) # Google'a nefes aldırıyoruz
+                continue
+            elif deneme == max_deneme - 1:
+                # Son hakta da hata verirse kullanıcıya göster ama uygulamayı çökertme
+                st.error("⚠️ Sistem yoğun, lütfen biraz yavaş işlem yapın.")
+                return pd.DataFrame() # Boş tablo dön ki uygulama patlamasın
+            else:
+                raise e # Başka bir hataysa fırlat
 
 def veri_gonder(df, sayfa): 
-    db.veri_yaz(df, sayfa)
+    # Yazma işleminde hata koruması
+    try:
+        db.veri_yaz(df, sayfa)
+        time.sleep(0.5) # İşlem sonrası yarım saniye zorunlu bekleme (Kotayı korumak için)
+    except Exception as e:
+        if "429" in str(e):
+             time.sleep(2)
+             db.veri_yaz(df, sayfa)
+        else:
+            st.error(f"Kayıt hatası: {e}")
+            
     veri_getir.clear()
     st.cache_data.clear()
 
@@ -116,14 +120,11 @@ with st.sidebar:
     secili_kullanici = st.selectbox("👤 Kullanıcı Seç", ["Seçiniz..."] + kullanici_listesi)
     
     st.markdown("---")
-    # Manuel yenileme butonu
     if st.button("🔄 Verileri Yenile", help="Anlık yenile"):
         st.cache_data.clear()
         st.rerun()
     
-    # Bilgi notunu güncelledik
     st.caption("⏳ Veriler her 1 dakikada otomatik güncellenir.")
-        
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
 
@@ -135,13 +136,11 @@ if secili_kullanici == "Seçiniz...":
 try:
     df_gorev = veri_getir(SAYFA_GOREVLER)
     df_sekme = veri_getir(SAYFA_SEKMELER)
-except Exception as e:
-    # Hata durumunda boş tablo döndür ki uygulama çökmesin
-    df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
+except Exception:
+    df_gorev = pd.DataFrame()
     df_sekme = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
 
-
-if df_gorev.empty:
+if df_gorev.empty and "Gorev" not in df_gorev.columns:
     df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
 if "Sira" not in df_gorev.columns: df_gorev["Sira"] = 0
 
@@ -156,19 +155,13 @@ if sayfa_secimi == "İş Panosu":
     
     for i, sekme_adi in enumerate(aktif_sekmeler):
         with sekmeler[i]:
-            # --- EKLEME ALANI ---
             with st.container(border=True):
                 c1, c2, c3, c4, c5 = st.columns([3, 1, 1.2, 2, 1], vertical_alignment="bottom")
-                with c1:
-                    is_metni = st.text_input("Gorev", key=f"t_{sekme_adi}", placeholder="Görev yaz...", label_visibility="collapsed")
-                with c2:
-                    resim = st.file_uploader("Resim", type=["jpg","png"], key=f"f_{sekme_adi}", label_visibility="collapsed")
-                with c3:
-                    aciliyet = st.selectbox("Öncelik", ["NORMAL", "ACİL", "YARIN"], key=f"a_{sekme_adi}", label_visibility="collapsed")
-                with c4:
-                    kime = st.multiselect("Atanan", kullanici_listesi, default=[], key=f"w_{sekme_adi}", placeholder="Kişi", label_visibility="collapsed")
-                with c5:
-                    ekle = st.button("EKLE", key=f"b_{sekme_adi}", type="primary")
+                with c1: is_metni = st.text_input("Gorev", key=f"t_{sekme_adi}", placeholder="Görev yaz...", label_visibility="collapsed")
+                with c2: resim = st.file_uploader("Resim", type=["jpg","png"], key=f"f_{sekme_adi}", label_visibility="collapsed")
+                with c3: aciliyet = st.selectbox("Öncelik", ["NORMAL", "ACİL", "YARIN"], key=f"a_{sekme_adi}", label_visibility="collapsed")
+                with c4: kime = st.multiselect("Atanan", kullanici_listesi, default=[], key=f"w_{sekme_adi}", placeholder="Kişi", label_visibility="collapsed")
+                with c5: ekle = st.button("EKLE", key=f"b_{sekme_adi}", type="primary")
 
                 if ekle and is_metni:
                     r_yolu = ""
@@ -197,7 +190,6 @@ if sayfa_secimi == "İş Panosu":
 
             st.write("")
             
-            # --- LİSTELEME ---
             filtre = (df_gorev["Kategori"] == sekme_adi) & (df_gorev["Durum"] != "Silindi")
             df_gorev["Sira"] = pd.to_numeric(df_gorev["Sira"], errors='coerce').fillna(0)
             isler = df_gorev[filtre].sort_values(by="Sira", ascending=False)
@@ -209,25 +201,19 @@ if sayfa_secimi == "İş Panosu":
                     edit_key = f"edit_mode_{row['ID']}"
                     
                     if st.session_state.get(edit_key, False):
-                        # --- DÜZENLEME MODU ---
                         with st.container(border=True):
                             st.caption(f"✏️ Düzenleniyor: {row['Gorev']}")
                             with st.form(key=f"form_edit_{row['ID']}"):
                                 c_edit_1, c_edit_2 = st.columns([3, 1])
-                                with c_edit_1:
-                                    new_gorev = st.text_input("Görev Adı", value=row["Gorev"])
-                                with c_edit_2:
-                                    new_acil = st.selectbox("Öncelik", ["NORMAL", "ACİL", "YARIN"], index=["NORMAL", "ACİL", "YARIN"].index(row["Aciliyet"]) if row["Aciliyet"] in ["NORMAL", "ACİL", "YARIN"] else 0)
+                                with c_edit_1: new_gorev = st.text_input("Görev Adı", value=row["Gorev"])
+                                with c_edit_2: new_acil = st.selectbox("Öncelik", ["NORMAL", "ACİL", "YARIN"], index=["NORMAL", "ACİL", "YARIN"].index(row["Aciliyet"]) if row["Aciliyet"] in ["NORMAL", "ACİL", "YARIN"] else 0)
                                 
                                 st.markdown("---")
                                 c_res_1, c_res_2 = st.columns(2)
                                 with c_res_1:
                                     if row["ResimYolu"] and row["ResimYolu"] != "nan" and os.path.exists(row["ResimYolu"]):
                                         st.image(row["ResimYolu"], width=100)
-                                    else:
-                                        st.caption("Resim Yok")
                                     resim_sil = st.checkbox("Mevcut Resmi Sil", key=f"rs_{row['ID']}")
-                                
                                 with c_res_2:
                                     yeni_resim_yukle = st.file_uploader("Resmi Değiştir", type=["jpg", "png"], key=f"new_img_{row['ID']}")
 
@@ -236,8 +222,7 @@ if sayfa_secimi == "İş Panosu":
                                 if c_save.form_submit_button("💾 Kaydet", type="primary"):
                                     df_gorev.loc[df_gorev["ID"] == row["ID"], "Gorev"] = new_gorev
                                     df_gorev.loc[df_gorev["ID"] == row["ID"], "Aciliyet"] = new_acil
-                                    if resim_sil:
-                                        df_gorev.loc[df_gorev["ID"] == row["ID"], "ResimYolu"] = ""
+                                    if resim_sil: df_gorev.loc[df_gorev["ID"] == row["ID"], "ResimYolu"] = ""
                                     if yeni_resim_yukle:
                                         r_ad = f"{int(time.time())}_{yeni_resim_yukle.name}"
                                         r_yolu = os.path.join(KLASOR_RESIMLER, r_ad)
@@ -247,22 +232,12 @@ if sayfa_secimi == "İş Panosu":
                                     veri_gonder(df_gorev, SAYFA_GOREVLER)
                                     st.session_state[edit_key] = False
                                     st.rerun()
-                                
                                 if c_cancel.form_submit_button("İptal"):
                                     st.session_state[edit_key] = False
                                     st.rerun()
-                    
                     else:
-                        # --- NORMAL GÖRÜNÜM ---
-                        bg_col = "white"
-                        if row["Durum"] == "Tamamlandı": bg_col = "#eaffea" 
-                        elif row["Aciliyet"] == "ACİL": bg_col = "#fffde7" 
-
                         with st.container(border=True):
-                            # MOBİL İÇİN HİZALAMA
                             c_yon, c_icerik, c_btn = st.columns([0.6, 6.4, 1.8], vertical_alignment="center")
-                            
-                            # 1. YÖN
                             with c_yon:
                                 y1, y2 = st.columns(2)
                                 with y1:
@@ -274,18 +249,13 @@ if sayfa_secimi == "İş Panosu":
                                         df_gorev.loc[df_gorev["ID"] == row["ID"], "Sira"] = time.time() - 100
                                         veri_gonder(df_gorev, SAYFA_GOREVLER); st.rerun()
 
-                            # 2. İÇERİK
                             with c_icerik:
                                 stil = f"~~**{row['Gorev']}**~~" if row["Durum"] == "Tamamlandı" else f"**{row['Gorev']}**"
                                 st.markdown(stil)
                                 if row["ResimYolu"] and row["ResimYolu"] != "nan" and os.path.exists(row["ResimYolu"]):
-                                    with st.expander("📷 Fotoğraf"):
-                                        st.image(row["ResimYolu"], use_container_width=True)
-                                atanan_kisa = isim_sadelestir(row["Atananlar"])
-                                ekleyen_kisa = isim_sadelestir(row["Ekleyen"])
-                                st.caption(f"📅 {row['Tarih']} | {atanan_kisa}")
+                                    with st.expander("📷 Fotoğraf"): st.image(row["ResimYolu"], use_container_width=True)
+                                st.caption(f"📅 {row['Tarih']} | {isim_sadelestir(row['Atananlar'])}")
 
-                            # 3. BUTONLAR
                             with c_btn:
                                 b1, b2, b3 = st.columns(3)
                                 with b1:
@@ -307,9 +277,7 @@ if sayfa_secimi == "İş Panosu":
                                         st.rerun()
 
 # --- DİĞER SAYFALAR ---
-elif sayfa_secimi == "Kullanıcılar":
-    ky.yonetim_sayfasi()
-
+elif sayfa_secimi == "Kullanıcılar": ky.yonetim_sayfasi()
 elif sayfa_secimi == "Kategoriler":
     st.header("📂 Kategoriler")
     with st.form("k_form"):
@@ -323,7 +291,6 @@ elif sayfa_secimi == "Kategoriler":
         if c2.button("Sil", key=f"ks_{row['ID']}"):
             df_sekme.loc[df_sekme["ID"]==row["ID"], "Durum"]="Silindi"
             veri_gonder(df_sekme, SAYFA_SEKMELER); st.rerun()
-
 elif sayfa_secimi == "Çöp Kutusu":
     st.title("🗑️ Çöp Kutusu")
     if st.button("🔥 Hepsini Kalıcı Sil"):
