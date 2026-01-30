@@ -23,18 +23,25 @@ def get_kullanici_listesi_formatli():
     else:
         df = veri_getir()
         
-    if df.empty: return []
+    # --- HATA ÇÖZÜMÜ: EKSİK SÜTUN KONTROLÜ ---
+    # Eğer veri boşsa veya sütunlar eksikse tamamla
+    if df.empty:
+        return []
     
-    if "Sira" not in df.columns:
-        df["Sira"] = 0
-    
-    # Sıralama işlemini yap (Sayıya çevir ve sırala)
-    df["Sira"] = pd.to_numeric(df["Sira"], errors='coerce').fillna(0)
-    df = df.sort_values(by="Sira", ascending=False)
+    gerekli_sutunlar = ["Ad", "Rol", "Durum", "ID", "Sira"]
+    for col in gerekli_sutunlar:
+        if col not in df.columns:
+            df[col] = "" # Eksik sütunu boş olarak ekle
+            
+    # Sıralama işlemini yap
+    if "Sira" in df.columns:
+        df["Sira"] = pd.to_numeric(df["Sira"], errors='coerce').fillna(0)
+        df = df.sort_values(by="Sira", ascending=False)
     
     k_listesi = []
     for _, row in df.iterrows():
-        if row["Durum"] == "Aktif":
+        # "Durum" sütunu artık garanti var, hata vermez.
+        if str(row["Durum"]) == "Aktif":
             k_listesi.append(f"{row['Ad']} ({row['Rol']})")
     return k_listesi
 
@@ -42,16 +49,25 @@ def get_kullanici_listesi_formatli():
 def yonetim_sayfasi():
     st.header("👥 Kullanıcı Yönetimi")
     
-    # Veriyi Hafızaya Al (Optimistic UI)
+    # Veriyi Hafızaya Al
     if 'local_df_kul' not in st.session_state:
         st.session_state['local_df_kul'] = veri_getir()
     
     df = st.session_state['local_df_kul']
 
+    # --- HATA ÇÖZÜMÜ: TABLO BOŞSA SÜTUNLARI OLUŞTUR ---
+    gerekli_sutunlar = ["Ad", "Rol", "Durum", "ID", "Sira"]
     if df.empty:
-        df = pd.DataFrame(columns=["Ad", "Rol", "Durum", "ID", "Sira"])
-    
-    if "Sira" not in df.columns: df["Sira"] = 0
+        df = pd.DataFrame(columns=gerekli_sutunlar)
+    else:
+        # Doluysa ama sütun eksikse ekle
+        for col in gerekli_sutunlar:
+            if col not in df.columns:
+                df[col] = ""
+
+    # Sayısal dönüşüm
+    df["Sira"] = pd.to_numeric(df["Sira"], errors='coerce').fillna(0)
+    st.session_state['local_df_kul'] = df # Güncellenmiş halini kaydet
 
     # --- YENİ KULLANICI EKLEME ---
     with st.container(border=True):
@@ -67,15 +83,16 @@ def yonetim_sayfasi():
                     "Rol": yeni_rol, 
                     "Durum": "Aktif", 
                     "ID": str(int(time.time())),
-                    "Sira": int(time.time()) # En üste ekle
+                    "Sira": int(time.time()) 
                 }
-                st.session_state['local_df_kul'] = pd.concat([df, pd.DataFrame([yeni])], ignore_index=True)
+                # DataFrame birleştirme
+                st.session_state['local_df_kul'] = pd.concat([st.session_state['local_df_kul'], pd.DataFrame([yeni])], ignore_index=True)
                 
                 # Arka planda kaydet
                 thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_kul'],))
                 thread.start()
                 
-                # Cache temizle ki Sidebar güncellensin
+                # Cache temizle
                 st.cache_data.clear()
                 
                 st.success(f"{yeni_ad} eklendi!")
@@ -85,40 +102,32 @@ def yonetim_sayfasi():
     st.markdown("---")
     
     # --- LİSTELEME VE SIRALAMA ---
-    st.session_state['local_df_kul']["Sira"] = pd.to_numeric(st.session_state['local_df_kul']["Sira"], errors='coerce').fillna(0)
-    
-    # Aktif kullanıcıları çek ve SIRA'ya göre diz
+    # Sadece Aktif olanları filtrele ve Sıraya göre diz
     aktif_kullanicilar = st.session_state['local_df_kul'][st.session_state['local_df_kul']["Durum"] == "Aktif"].sort_values(by="Sira", ascending=False)
+    
+    if aktif_kullanicilar.empty:
+        st.info("Henüz ekli personel yok.")
     
     for idx, row in aktif_kullanicilar.iterrows():
         with st.container(border=True):
-            # Mobilde de güzel gözüksün diye oranlar: [Oklar, İsim, Rol, Sil]
             c_yon, c_ad, c_rol, c_sil = st.columns([1, 3, 2, 1], vertical_alignment="center")
             
             # 1. OK İŞARETLERİ
             with c_yon:
                 y1, y2 = st.columns(2)
                 with y1:
-                    # YUKARI TAŞIMA
                     if st.button("⬆️", key=f"ku_{row['ID']}"):
                         st.session_state['local_df_kul'].loc[st.session_state['local_df_kul']["ID"] == row["ID"], "Sira"] = time.time() + 100
-                        
-                        # Arka planda kaydet
                         thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_kul'],))
                         thread.start()
-                        
-                        # Sidebar listesini güncellemek için cache temizle
                         st.cache_data.clear()
                         st.rerun()
                         
                 with y2:
-                    # AŞAĞI TAŞIMA
                     if st.button("⬇️", key=f"kd_{row['ID']}"):
                         st.session_state['local_df_kul'].loc[st.session_state['local_df_kul']["ID"] == row["ID"], "Sira"] = time.time() - 100
-                        
                         thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_kul'],))
                         thread.start()
-                        
                         st.cache_data.clear()
                         st.rerun()
 
@@ -131,9 +140,7 @@ def yonetim_sayfasi():
             # 4. SİL BUTONU
             if c_sil.button("Sil", key=f"ksil_{row['ID']}"):
                 st.session_state['local_df_kul'].loc[st.session_state['local_df_kul']["ID"] == row["ID"], "Durum"] = "Silindi"
-                
                 thread = threading.Thread(target=veri_gonder_arkaplan, args=(st.session_state['local_df_kul'],))
                 thread.start()
-                
                 st.cache_data.clear()
                 st.rerun()
