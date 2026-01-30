@@ -11,10 +11,10 @@ from streamlit_autorefresh import st_autorefresh
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
 
-# --- OTOMATİK YENİLEME AYARI (YENİ) ---
-# interval=10000 (milisaniye cinsinden 10 saniye demektir)
-# Bu kod sayfayı dondurmadan arka planda sayar ve 10 saniye dolunca verileri tazeler.
-st_autorefresh(interval=10000, limit=None, key="ofis_takip_auto_refresh")
+# --- OTOMATİK YENİLEME AYARI (GÜNCELLENDİ) ---
+# 10 saniye çok agresif olduğu için kotayı doldurdu. 
+# Bunu 30 saniye (30000 ms) yapıyoruz. Bu en güvenli sınırdır.
+st_autorefresh(interval=30000, limit=None, key="ofis_takip_auto_refresh")
 
 # --- CSS: TASARIM VE MOBİL HİZALAMA ---
 st.markdown("""
@@ -76,14 +76,17 @@ def isim_sadelestir(metin):
         temiz_isimler.append(ilk_isim)
     return ", ".join(temiz_isimler)
 
-# Cache süresini kısalttık (veya auto-refresh zaten cache'i temizleyerek çalışacak)
-# Ama burada TTL'i yine de güvenli tutalım, refresh sırasında cache.clear() yapacağız.
-@st.cache_data(ttl=600, show_spinner=False)
+# CACHE AYARI (ÖNEMLİ DEĞİŞİKLİK)
+# ttl=30 yaptık. Yani veri 30 saniye boyunca hafızada kalsın, Google'a sormasın.
+# 30 saniye dolunca otomatik gidip Google'dan yenisini alacak.
+# Bu sayede "clear()" komutuna gerek kalmadan sistem kendini güncelleyecek.
+@st.cache_data(ttl=30, show_spinner=False)
 def veri_getir(sayfa): 
     return db.veri_cek(sayfa)
 
 def veri_gonder(df, sayfa): 
     db.veri_yaz(df, sayfa)
+    # Yazma işlemi yapınca (Ekle/Sil/Düzenle) cache'i temizliyoruz ki değişiklik hemen görünsün.
     veri_getir.clear()
     st.cache_data.clear()
 
@@ -98,13 +101,12 @@ with st.sidebar:
     secili_kullanici = st.selectbox("👤 Kullanıcı Seç", ["Seçiniz..."] + kullanici_listesi)
     
     st.markdown("---")
-    # Manuel yenileme butonu hala kalsın, acil durumlar için.
+    # Manuel yenileme butonu
     if st.button("🔄 Verileri Yenile", help="Anlık yenile"):
         st.cache_data.clear()
         st.rerun()
     
-    # Bilgi notu (İsteğe bağlı silebilirsin)
-    st.caption("⏳ Sayfa her 10 saniyede bir güncellenir.")
+    st.caption("⏳ Veriler 30 saniyede bir güncellenir.")
         
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
@@ -113,24 +115,20 @@ if secili_kullanici == "Seçiniz...":
     st.warning("Lütfen işlem yapmak için sol menüden isminizi seçin.")
     st.stop()
 
-# Auto-Refresh çalıştığında cache'den eski veriyi getirmemesi için
-# Her döngüde cache'i temizlemek biraz ağır olabilir ama "Canlı" görüntü için gereklidir.
-# Ancak sürekli cache temizlemek Google API kotasını zorlayabilir.
-# Bu yüzden şöyle bir mantık kuruyoruz:
-# Streamlit her refresh attığında kod baştan çalışır.
-# Biz sadece veri_getir fonksiyonunu çağırıyoruz. Cache süresi (ttl=600) olduğu için Google'a gitmez.
-# AMA sen "Canlı" olsun istiyorsun. O zaman Google'a gitmek ZORUNDA.
-# Kotayı korumak için bu süreyi 10 saniye yapmak riskli olabilir (dakikada 6 istek x Kullanıcı Sayısı).
-# Eğer kullanıcı sayısı azsa (3-5 kişi) sorun olmaz. Ama 50 kişi varsa Google "Yavaş ol" diyebilir.
-# Şimdilik "Cache"i temizlemeden sadece sayfayı yeniletiyoruz. 
-# Eğer veriler güncellenmiyorsa `veri_getir.clear()` komutunu aktif ederiz.
-
 # --- VERİLERİ YÜKLE ---
-# Her 10 saniyede bir sayfayı yenilediğimizde güncel veriyi çekmek için cache'i deliyoruz.
-# Not: Kota sorunu yaşarsan buradaki .clear() satırlarını kaldır.
-veri_getir.clear() 
-df_gorev = veri_getir(SAYFA_GOREVLER)
-df_sekme = veri_getir(SAYFA_SEKMELER)
+# BURADAKİ "veri_getir.clear()" KODUNU KALDIRDIK 🛑
+# Artık her 30 saniyede bir @st.cache_data(ttl=30) sayesinde otomatik güncelleyecek.
+# Bu sayede kotayı patlatmayacağız.
+
+try:
+    df_gorev = veri_getir(SAYFA_GOREVLER)
+    df_sekme = veri_getir(SAYFA_SEKMELER)
+except Exception as e:
+    # Eğer kota hatası verirse kullanıcıya kibarca beklemesini söyleyelim
+    st.error("⚠️ Google Hız Sınırı: Sistem çok hızlı yenilendiği için kısa bir mola verdi. 1 dakika içinde düzelecektir.")
+    df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
+    df_sekme = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
+
 
 if df_gorev.empty:
     df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
