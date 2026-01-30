@@ -5,42 +5,59 @@ import time
 from datetime import datetime
 import db_baglanti as db
 import kullanicilar_yonetimi as ky 
-# Otomatik yenileme kütüphanesini çağırıyoruz
 from streamlit_autorefresh import st_autorefresh
 
 # --- SAYFA AYARLARI ---
 st.set_page_config(page_title="Ofis İş Takip", page_icon="🏢", layout="wide")
 
-# --- OTOMATİK YENİLEME AYARI (GÜNCELLENDİ) ---
-# 10 saniye çok agresif olduğu için kotayı doldurdu. 
-# Bunu 30 saniye (30000 ms) yapıyoruz. Bu en güvenli sınırdır.
-st_autorefresh(interval=30000, limit=None, key="ofis_takip_auto_refresh")
+# --- OTOMATİK YENİLEME AYARI (1 DAKİKA) ---
+# interval=60000 (60 saniye). Sayfa 1 dakikada bir sessizce yenilenir.
+st_autorefresh(interval=60000, limit=None, key="ofis_takip_auto_refresh")
 
-# --- CSS: TASARIM VE MOBİL HİZALAMA ---
+# --- CSS: TASARIM, MOBİL HİZALAMA VE "HAYALET YENİLEME" ---
 st.markdown("""
     <style>
-    /* Dosya Yükleyici */
+    /* 1. YENİLEME EFEKTİNİ GİZLEME (HAYALET MODU) */
+    /* Sağ üstteki 'Running' animasyonunu ve durdur butonunu gizle */
+    [data-testid="stStatusWidget"] {
+        visibility: hidden;
+        height: 0%;
+        position: fixed;
+    }
+    
+    /* Sayfa yenilenirken elementlerin silikleşmesini (grileşmesini) engelle */
+    .stApp {
+        opacity: 1 !important;
+    }
+    .element-container {
+        opacity: 1 !important;
+    }
+    /* Streamlit'in otomatik 'stale' (bayat) sınıfını ezerek opaklığı tam tut */
+    div[data-stale="true"] {
+        opacity: 1 !important;
+    }
+
+    /* 2. DOSYA YÜKLEYİCİ AYARLARI */
     [data-testid="stFileUploader"] { padding: 0 !important; margin: 0 !important; height: 38px !important; }
     [data-testid="stFileUploaderDropzone"] { min-height: 0px !important; height: 38px !important; border: 1px dashed #aaa !important; background-color: #f9f9f9; display: flex; align-items: center; justify-content: center; }
     [data-testid="stFileUploaderDropzone"]::before { content: '📷 Foto Ekle'; font-size: 13px; font-weight: bold; color: #555;}
     [data-testid="stFileUploaderDropzone"] div div, [data-testid="stFileUploaderDropzone"] span, [data-testid="stFileUploaderDropzone"] small { display: none !important; }
     
-    /* YÜKLENEN DOSYA LİSTESİNİ GİZLEME */
+    /* Yüklenen dosya listesini gizle */
     [data-testid="stFileUploader"] ul { display: none !important; }
     [data-testid="stFileUploader"] section { display: none !important; } 
     .uploadedFile { display: none !important; }
 
-    /* Butonlar */
+    /* 3. BUTON VE EXPANDER AYARLARI */
     div.stButton > button { width: 100%; border-radius: 6px; height: 38px; font-weight: bold; padding: 0px !important;}
     
-    /* Expander Ayarları */
     .streamlit-expanderHeader { 
         font-size: 13px; color: #333; padding: 0px !important; 
         background-color: transparent !important; border: none !important;
     }
     .streamlit-expanderContent { padding-top: 5px !important; padding-bottom: 5px !important; }
 
-    /* --- MOBİL İÇİN KESİN ÇÖZÜM CSS --- */
+    /* 4. MOBİL İÇİN YAN YANA HİZALAMA (KESİN ÇÖZÜM) */
     @media (max-width: 768px) {
         [data-testid="column"] [data-testid="stVerticalBlock"] > [data-testid="stHorizontalBlock"] {
             flex-direction: row !important;
@@ -76,17 +93,15 @@ def isim_sadelestir(metin):
         temiz_isimler.append(ilk_isim)
     return ", ".join(temiz_isimler)
 
-# CACHE AYARI (ÖNEMLİ DEĞİŞİKLİK)
-# ttl=30 yaptık. Yani veri 30 saniye boyunca hafızada kalsın, Google'a sormasın.
-# 30 saniye dolunca otomatik gidip Google'dan yenisini alacak.
-# Bu sayede "clear()" komutuna gerek kalmadan sistem kendini güncelleyecek.
-@st.cache_data(ttl=30, show_spinner=False)
+# CACHE AYARI (1 DAKİKA)
+# Sayfa 60 saniyede bir yenileniyor. Cache süresini 50 saniye yapalım ki
+# sayfa yenilendiğinde cache süresi dolmuş olsun ve mecburen yeni veriyi çeksin.
+@st.cache_data(ttl=50, show_spinner=False)
 def veri_getir(sayfa): 
     return db.veri_cek(sayfa)
 
 def veri_gonder(df, sayfa): 
     db.veri_yaz(df, sayfa)
-    # Yazma işlemi yapınca (Ekle/Sil/Düzenle) cache'i temizliyoruz ki değişiklik hemen görünsün.
     veri_getir.clear()
     st.cache_data.clear()
 
@@ -106,7 +121,8 @@ with st.sidebar:
         st.cache_data.clear()
         st.rerun()
     
-    st.caption("⏳ Veriler 30 saniyede bir güncellenir.")
+    # Bilgi notunu güncelledik
+    st.caption("⏳ Veriler her 1 dakikada otomatik güncellenir.")
         
     st.markdown("---")
     sayfa_secimi = st.radio("Menü", ["İş Panosu", "Kullanıcılar", "Kategoriler", "Çöp Kutusu"])
@@ -116,16 +132,11 @@ if secili_kullanici == "Seçiniz...":
     st.stop()
 
 # --- VERİLERİ YÜKLE ---
-# BURADAKİ "veri_getir.clear()" KODUNU KALDIRDIK 🛑
-# Artık her 30 saniyede bir @st.cache_data(ttl=30) sayesinde otomatik güncelleyecek.
-# Bu sayede kotayı patlatmayacağız.
-
 try:
     df_gorev = veri_getir(SAYFA_GOREVLER)
     df_sekme = veri_getir(SAYFA_SEKMELER)
 except Exception as e:
-    # Eğer kota hatası verirse kullanıcıya kibarca beklemesini söyleyelim
-    st.error("⚠️ Google Hız Sınırı: Sistem çok hızlı yenilendiği için kısa bir mola verdi. 1 dakika içinde düzelecektir.")
+    # Hata durumunda boş tablo döndür ki uygulama çökmesin
     df_gorev = pd.DataFrame(columns=["Gorev","Durum","Aciliyet","Tarih","IslemZamani","ID","Kategori","Atananlar","ResimYolu","Ekleyen","Sira"])
     df_sekme = pd.DataFrame([{"Ad": "GENEL", "Durum": "Aktif", "ID": 1001}])
 
